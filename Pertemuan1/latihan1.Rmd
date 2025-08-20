@@ -1,7 +1,6 @@
-a = 1
-b = 3
-c = a + b
-print(c)
+# **INSTALASI PACKAGE**
+```{r}
+install.packages(c("forecast", "graphics", "TTR", "TSA", "aTSA", "lmtest", "MLmetrics",
+"car", "dplyr", "MASS", "tsibble", "tseries", "ggplot2", "nortest" ))
+```
 
-e = a + b + c
-print(e)
