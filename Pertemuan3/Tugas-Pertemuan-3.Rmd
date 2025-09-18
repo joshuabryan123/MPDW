@@ -1,0 +1,329 @@
+---
+title: "**MPDW PRAKTIKUM P3**"
+author: "Joshua Bryan Wijaya_G1401231082"
+date: "2025-09-15"
+output:
+  html_document:
+    always_allow_html: true
+    toc: true
+    toc_float: true
+    self_contained: true
+  pdt_document:
+    toc: true
+    number_sections: true
+    latex_engine: xelatex
+    extra_dependencies: ["float", "xcolor", "graphicx"]
+css: style2.css
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+# **LIBRARY**
+```{r}
+library(dLagM)
+library(dynlm)
+library(MLmetrics)
+library(lmtest)
+library(car)
+library(dplyr)
+library(readxl)
+library(ggplot2)
+```
+
+# **DATA**
+```{r}
+data <- read.csv("C:/Users/Dell/OneDrive/Desktop/SEMESTER 5/MPDW/Pertemuan 3/NewDelhi_Air_quality.csv")
+data
+```
+
+# **EKSPLORASI DATA**
+```{r}
+summary(data)
+colSums(is.na(data))
+data[!complete.cases(data), ]
+```
+<br>
+<span style="background-color: #FFFF99"> Data **Kualitas Udara New Delhi** merupakan data deret waktu untuk kualitas udara di New Delhi yang tercatat untuk 72 periode waktu, mulai dari 21 Oktober 2022 hingga 24 Oktober 2022. Tiap observasi dicatat dalam selang 1 jam, sehingga 72 periode waktu berarti ada 72 jam amatan untuk kualitas udara. Data tidak memiliki data null dan tidak memiliki record waktu yang hilang. Selain itu, tipe data untuk setiap peubah pada data sudah sesuai.</span>
+
+
+# **SPLIT DATA**
+```{r}
+train<-data[1:58,]
+test<-data[59:72,]
+train.ts<-ts(train)
+test.ts<-ts(test)
+data.ts<-ts(data)
+```
+<br>
+<span style="background-color: #FFFF99"> Data **Kualitas Udara New Delhi** kemudian dibagi menjadi data uji dan data latih. Perbandingan yang digunakan adalah 80:20, sehingga data latih berjumlah 58 observasi dan data uji berjumlah 14 observasi. </span>
+
+# **VISUALISASI**
+```{r}
+ggplot() + 
+  geom_line(data = train, aes(x = X, y = AQI, col = "Data Latih")) +
+  geom_line(data = test, aes(x = X, y = AQI, col = "Data Uji")) +
+  labs(x = "Periode Waktu", y = "AQI", color = "Legend") +
+   scale_colour_manual(name="Keterangan:", breaks = c("Data Latih", "Data Uji"),
+                      values = c("blue", "red")) + 
+  theme_bw() + theme(legend.position = "bottom",
+                     plot.caption = element_text(hjust=0.5, size=12))
+```
+
+# **MODEL KOYCK**
+```{r}
+model.koyck <- koyckDlm(x = train$o3, y = train$AQI)
+summary(model.koyck)
+```
+
+
+```{r}
+AIC(model.koyck)
+BIC(model.koyck)
+```
+<br>
+Dari hasil tersebut, didapat bahwa peubah $x_t$ dan $y_{t-1}$ memiliki nilai $P - Value < 0.05$. Hal ini menunjukkan bahwa peubah $x_t$ dan $y_{t-1}$ berpengaruh signifikan terhadap $y$. Adapun model keseluruhannya adalah sebagai berikut
+
+$$Y_t = 0.2626 + 0.2582X_t + 0.4294Y_{t-1}$$
+
+<br>
+Model Koyck merupakan salah satu pendekatan dari model Distributed Lag, dimana Y akan didefinisikan dengan peubah X pada lag tertentu, tapi tidak dengan diri Y sendiri. Alasan kenapa peubah $y_{t-1}$ muncul dalam persamaan adalah karena penurunan persamaan akibat penurunan koefisien secara konstan pada model Koyck. Penurunan rumus ini menyebabkan persamaan model Koyck yang awalnya berupa:
+$$y_t= \alpha + \beta_0 X_t + \beta_0 CX_{t-1} + \beta_0 C^2 X_{t-2} $$
+akan dilakukan penurunan rumus hingga menjadi:
+$$y_t= \alpha (1-C) + \beta_0 X_t + CY_{t-1} + V_t $$
+Oleh sebab itulah muncul $y_{t-1}$ dalam model
+
+## Peramalan
+```{r}
+fore.koyck <- forecast(model = model.koyck, x=test$o3, h=14)
+fore.koyck
+```
+<br>
+<span style="background-color: #FFFF99"> Distributed Lag Model (DLM) dapat didekati dengan menggunakan persamaan koyck. Nilai Y pada data test akan diprediksi menggunakan persamaan dari model koyck, dengan input x pada data test. Forecast akan dilakukan untuk 14 observasi pada data uji. </span>
+
+## Akurasi
+```{r}
+mape.koyck <- MAPE(fore.koyck$forecasts, test$AQI)
+mape.koyck
+GoF(model.koyck)
+```
+<br>
+<span style="background-color: #FFFF99"> Untuk mengukur performa model Koyck, dihitung nilai MAPE dengan membandingkan nilai y hasil prediksi dengan nilai y aktual yang ada pada data test. Nilai MAPE yang diperoleh untuk hasil peramalan pada data uji adalah 0.029 atau setara dengan 2.9%. Selain itu, menggunakan fungsi **GoF**, diperoleh nilai MAPE 0.015, atau setara 1.5%. Artinya, Nilai MAPE untuk prediksi data latih maupun peramalan data uji memiliki MAPE < 10%, sehingga dapat dikatakan, persamaan Koyck yang diperoleh dari data latih sudah cukup baik dalam prediksi serta tidak mengalami overfitting </span>
+
+
+# **REGRESSION WITH DISTRIBUTED LAG**
+## Menentukan lag optimum
+```{r}
+finiteDLMauto(formula = AQI ~ o3,
+              data = data.frame(train), q.min = 1, q.max = 10,
+              model.type = "dlm", error.type = "AIC", trace = TRUE)
+```
+<br>
+<span style="background-color: #FFFF99"> Berdasarkan output diatas, **lag = 10** merupakan lag optimum bagi data. Hal ini dikarenakan nilai AIC-nya paling kecil (**AIC = 24.11**) dan $\adj.R^2$-nya paling tinggi, yaitu 0.98. Selanjutnya akan dilakukan pemodelan dengan lag=10 </span>
+
+```{r}
+model.dlm <- dlm(x = train$o3,y = train$AQI , q = 10)
+summary(model.dlm)
+```
+<br>
+Setelah diperoleh bahwa lag optimum X untuk peramalan Y adalah 10, maka dilakukan pemodelan DLM menggunakan lag = 10. Dari hasil tersebut, didapat bahwa peubah $x_t$, $x_{t-7}$, $x_{t-8}$, dan $x_{t-9}$ memiliki nilai $P - Value < 0.05$. Hal ini menunjukkan bahwa peubah $x_t$, $x_{t-7}$, $x_{t-8}$, dan $x_{t-9}$ berpengaruh signifikan terhadap $Y_t$. Adapun model keseluruhannya adalah sebagai berikut
+
+$$Y_t = -0.6427 + 0.4281X_t + 0.1389x_{t-1} - 0.0573x_{t-2} - 0.1499x_{t-3} + 0.1591x_{t-4} - 0.0134x_{t-5} - 0.1271x_{t-6} + 0.2737x_{t-7} - 0.3746x_{t-8} + 0.2892x_{t-9} - 0.0954x_{t-10}$$
+
+```{r}
+AIC(model.dlm)
+BIC(model.dlm)
+```
+<br>
+Sebelumnya kan model DLM didekati dengan persamaan koyck. Tapi disini dengan pemodelan DLM langsung, hasil akhir modelnya sudah sesuai dengan model yang diperkenalkan pada DLM, yakni $Y_t$ didefinisikan oleh lag peubah X.
+$$y_t= \alpha + \beta_0 X_t + \beta_0 CX_{t-1} + \beta_0 C^2 X_{t-2} $$
+
+## Peramalan
+```{r}
+fore.dlm <- forecast(model = model.dlm, x=test$o3, h=14)
+fore.dlm
+```
+<br>
+<span style="background-color: #FFFF99"> Nilai Y pada data test akan diprediksi menggunakan persamaan dari model DLM, dengan input x pada data test. Forecast akan dilakukan untuk 14 observasi pada data uji. </span>
+
+## Akurasi
+```{r}
+mape.dlm<- MAPE(fore.dlm$forecasts, test$AQI)
+mape.dlm
+GoF(model.dlm)
+```
+
+<br>
+<span style="background-color: #FFFF99"> Untuk mengukur performa model DLM, dihitung nilai MAPE dengan membandingkan nilai y hasil prediksi dengan nilai y aktual yang ada pada data test. Nilai MAPE yang diperoleh untuk hasil peramalan pada data uji adalah 0.0127 atau setara dengan 1.27%. Selain itu, menggunakan fungsi **GoF**, diperoleh nilai MAPE 0.0074, atau setara 0.74%. Artinya, Nilai MAPE untuk prediksi data latih maupun peramalan data uji memiliki MAPE < 10%, sehingga dapat dikatakan, persamaan DLM yang diperoleh dari data latih sudah cukup baik dalam prediksi serta tidak mengalami overfitting </span>
+
+# **MODEL AUTOREGRESSIVE**
+## Mencari Lag Optimum
+```{r}
+model.ardl.opt <- ardlBoundOrders(data = data.frame(train), ic = "AIC", 
+                                  formula = AQI ~ o3)
+model.ardl.opt
+```
+
+```{r}
+min_p=c()
+for(i in 1:6){
+  min_p[i]=min(model.ardl.opt$Stat.table[[i]])
+}
+q_opt=which(min_p==min(min_p, na.rm = TRUE))
+p_opt=which(model.ardl.opt$Stat.table[[q_opt]] == 
+              min(model.ardl.opt$Stat.table[[q_opt]], na.rm = TRUE))
+data.frame("q_optimum" = q_opt, "p_optimum" = p_opt, 
+           "AIC"=model.ardl.opt$min.Stat)
+```
+<br>
+<span style="background-color: #FFFF99"> Dari tabel di atas, dapat terlihat bahwa nilai AIC terendah didapat ketika **p=13** dan **q=5**, yaitu sebesar -10,60372. Artinya, model autoregressive optimum didapat ketika **p=13** dan **q=5**. Selanjutnya dapat dilakukan pemodelan dengan nilai p dan q optimum seperti inisialisasi di langkah sebelumnya. </span>
+
+```{r}
+model.ardl <- ardlDlm(formula = AQI ~ o3, 
+                         data = train,p = 13 , q = 5)
+summary(model.ardl)
+```
+
+```{r}
+AIC(model.ardl)
+BIC(model.ardl)
+```
+
+<br>
+Setelah diperoleh bahwa lag optimum X untuk peramalan Y adalah 13 dan lag optimum Y untuk peramalan Y adalah 5, maka dilakukan pemodelan DLM menggunakan lag X = 13 dan lag Y = 5. Dari hasil tersebut, didapat bahwa peubah $x_{t-1}$ memiliki nilai $P - Value < 0.05$. Hal ini menunjukkan bahwa peubah $x_{t-1}$ berpengaruh signifikan terhadap $Y_t$. Adapun model keseluruhannya adalah sebagai berikut
+
+$$Y_t = -1.0282 + 0.4252X_t + 0.2072X_{t-1} - 0.1618X_{t-2} + 0.0084X_{t-3} + 0.1774X_{t-4} + 0.0297X_{t-5} - 0.1885X_{t-6} + 0.2517X_{t-7} - 0.2511X_{t-8} + 0.0997X_{t-9} + 0.1679X_{t-10} - 0.2459X_{t-11} + 0.0848X_{t-12} + 0.0119X_{t-13} - 0.1185Y_{t-1} + 0.1213Y_{t-2} - 0.1905Y_{t-3} - 0.1447Y_{t-4} + 0.0313Y_{t-5}$$
+
+## Peramalan
+```{r}
+fore.ardl <- forecast(model = model.ardl, x=test$o3, h=14)
+fore.ardl
+```
+<br>
+<span style="background-color: #FFFF99"> Nilai Y pada data test akan diprediksi menggunakan persamaan dari model ARDL, dengan input x pada data test. Forecast akan dilakukan untuk 14 observasi pada data uji. </span>
+
+## Akurasi
+```{r}
+mape.ardl <- MAPE(fore.ardl$forecasts, test$AQI)
+mape.ardl
+GoF(model.ardl)
+```
+<br>
+<span style="background-color: #FFFF99"> Untuk mengukur performa model ARDL, dihitung nilai MAPE dengan membandingkan nilai y hasil prediksi dengan nilai y aktual yang ada pada data test. Nilai MAPE yang diperoleh untuk hasil peramalan pada data uji adalah 0.0125 atau setara dengan 1.25%. Selain itu, menggunakan fungsi **GoF**, diperoleh nilai MAPE 0.0069, atau setara 0.69%. Artinya, Nilai MAPE untuk prediksi data latih maupun peramalan data uji memiliki MAPE < 10%, sehingga dapat dikatakan, persamaan ARDL yang diperoleh dari data latih sudah cukup baik dalam prediksi serta tidak mengalami overfitting. </span>
+
+# **PERBANDINGAN MODEL**
+```{r}
+akurasi <- matrix(c(mape.koyck, mape.dlm, mape.ardl))
+row.names(akurasi)<- c("Koyck","DLM","Autoregressive")
+colnames(akurasi) <- c("MAPE")
+akurasi
+```
+<br>
+<span style="background-color: #FFFF99"> MAPE untuk forecast data uji pada ketiga model dibandingkan untuk beroleh model terbaik. Model dengan MAPE terkecil adalah model ARDL, meskipun, model ini juga yang memiliki peubah signifikan paling sedikit terhadap  $Y_t$, yakni hanya 1 peubah. </span>
+
+# **PLOT PERBANDINGAN MODEL**
+```{r}
+par(mfrow=c(1,1))
+plot(test$o3, test$AQI, type="b", col="black", ylim=c(15,30))
+points(test$o3, fore.koyck$forecasts, col="red");   lines(test$o3, fore.koyck$forecasts, col="red")
+points(test$o3, fore.dlm$forecasts, col="blue");    lines(test$o3, fore.dlm$forecasts, col="blue")
+points(test$o3, fore.ardl$forecasts, col="green");  lines(test$o3, fore.ardl$forecasts, col="green")
+
+legend("topleft",
+       c("Aktual", "Koyck","DLM", "Autoregressive"),
+       lty=1,lwd=2, col=c("black","red","blue","orange","green"), cex=0.8)
+```
+
+<br>
+<span style="background-color: #FFFF99"> Berdasarkan plot perbandingan, terlihat bahwa semua model mampu mengikuti tren data aktual, meskipun dengan tingkat kedekatan yang berbeda. Model DLM dan Autoregressive cukup konsisten mendekati data aktual, sementara model Koyck tampak menyimpang pada awal periode sebelum kembali mendekati tren. </span>
+<br>
+
+# **UJI ASUMSI**
+## SSE model
+```{r}
+SSE.koyck <- sum(residuals(model.koyck)^2)
+SSE.koyck
+deviance(model.dlm$model)
+deviance(model.ardl$model)
+```
+<br>
+<span style="background-color: #FFFF99"> Jumlah kuadrat error (SSE) dari setiap model dihitung untuk prediksi data latih. Terlihat bahwa dari ketiga model, SSE terkecil diperoleh melalui model Autoregressive Distributed Lag (ARDL) dengan $\p-value$ sebesar 2.178. </span>
+
+## Uji Autokorelasi Residual
+<br>
+$H_0$ : Sisaan saling bebas (Tidak ada autokorelasi) <br> $H_1$ : Sisaan tidak saing bebas (Autokorelasi)<br>
+```{r}
+dwtest(model.koyck$model)
+dwtest(model.dlm$model)
+dwtest(model.ardl$model)
+```
+<br>
+<span style="background-color: #FFFF99"> Salah satu asumsi yang perlu dipenuhi dalam model deret waktu adalah resiudal harus saling bebas. Asumsi kebebasan residual diperiksa menggunakan uji formal **durbin-watson** pada ketiga model. </span>
+
+- Diperoleh p-value model Koyck sebesar 0.038 < $\alpha$ = 0.05. Dapat disimpulkan cukup bukti untuk tolak $H_0$ pada taraf nyata 5%. Sehingga, dapat dikatakan bahwa residual pada model Koyck tidak saling bebas (ada korelasi antar residual)
+- Diperoleh p-value DLM (Distributed Lag Model) dan model ARDL (Autoregressive Distributed Lag) sebesar 0.590 dan 0.274 > $\alpha$ = 0.05. Dapat disimpulkan cukup bukti untuk tolak $H_0$ pada taraf nyata 5%. Sehingga, dapat dikatakan bahwa residual pada model DLM dan ARDL bersifat saling bebas.
+
+## Uji Homogenitas Ragam
+<br>
+$H_0$ : Ragam sisaan konstan (homoskedastisitas) <br> $H_1$ : Ragam sisaan tidak konstan (Heteroskedastisitas)<br>
+```{r}
+bptest(model.koyck$model)
+bptest(model.dlm$model)
+bptest(model.ardl$model)
+```
+<br>
+<span style="background-color: #FFFF99"> Salah satu asumsi yang perlu dipenuhi dalam model deret waktu adalah homogenitas ragam residual. Asumsi kebebasan residual diperiksa menggunakan uji formal **Breusch-Pagan** pada ketiga model. </span>
+
+- Diperoleh p-value model Koyck sebesar 0.018 < $\alpha$ = 0.05. Dapat disimpulkan cukup bukti untuk tolak $H_0$ pada taraf nyata 5%. Sehingga, dapat dikatakan bahwa ragam residual pada model Koyck tidak menyebar homogen.
+- Diperoleh p-value DLM (Distributed Lag Model) dan model ARDL (Autoregressive Distributed Lag) sebesar 0.5508 dan 0.2097 > $\alpha$ = 0.05. Dapat disimpulkan cukup bukti untuk tolak $H_0$ pada taraf nyata 5%. Sehingga, dapat dikatakan bahwa ragam residual pada model DLM dan ARDL menyebar homogen.
+
+## Uji Normalitas
+<br>
+$H_0$ : Residual berdistribusi normal <br> $H_1$ : Residual tidak berdistribusi normal<br>
+```{r}
+shapiro.test(residuals(model.koyck$model))
+shapiro.test(residuals(model.dlm$model))
+shapiro.test(residuals(model.ardl$model))
+```
+<br>
+<span style="background-color: #FFFF99"> Salah satu asumsi yang perlu dipenuhi dalam model deret waktu adalah residual model menyebar normal. Asumsi kenormalan residual diperiksa menggunakan uji formal **Shapiro-wilk** pada ketiga model. </span>
+
+<span style="background-color: #FFFF99"> Diperoleh p-value model Koyck, ARDL, dan DLM (Distributed Lag Model) sebesar 0.3301, 0.2149 dan 0.1071 > $\alpha$ = 0.05. Dapat disimpulkan tidak cukup bukti untuk tolak $H_0$ pada taraf nyata 5%. Sehingga, dapat dikatakan bahwa residual pada model Koyck, ARDL, dan DLM menyebar normal.</span>
+
+
+# **KESIMPULAN**
+| Model        | MAPE Latih | MAPE Uji | SSE     | Normalitas | Homogenitas | Sisaan Bebas |
+|--------------|------------|----------|---------|------------|-------------|--------------|
+| Koyck        | 0.0150     | 0.0290   | 14.8214 | Memenuhi   | Tidak    | Tidak        |
+| DLM          | 0.0074     | 0.0127   | 2.7017  | Memenuhi   | Memenuhi    | Memenuhi     |
+| ARDL         | 0.0069     | 0.0125   | 2.1779  | Memenuhi    | Memenuhi    | Memenuhi     |
+
+<br>
+<span style="background-color: #FFFF99"> Berdasarkan MAPE Latih, MAPE Uji, SSE, dan uji asumsi, model terbaik untuk meramalkan 14 observasi data uji pada data Quality Air New Delhi, adalah model ARDL.</span>
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
