@@ -1,0 +1,393 @@
+---
+title: "**TUGAS MPDW PERTEMUAN 6**"
+author: "Joshua Bryan Wijaya~G1401231082"
+date: "2025-10-3"
+output:
+  html_document:
+    always_allow_html: true
+    toc: true
+    toc_float: true
+    self_contained: true
+  pdt_document:
+    toc: true
+    number_sections: true
+    latex_engine: xelatex
+    extra_dependencies: ["float", "xcolor", "graphicx"]
+css: style2.css
+editor_options:
+  markdown:
+    wrap: 72
+---
+
+# **LIBRARY**
+```{r}
+library(forecast)
+library(graphics)
+library(TTR)
+library(TSA)
+library(dplyr)
+library(rio)
+library(readxl)
+library(ggplot2)
+library(tsibble)
+library(tseries)
+library(MASS)
+```
+
+# **DATA**
+```{r}
+data <- read_xlsx("C:/JOSHUA BRYAN WIJAYA/SEMESTER 5/MPDW/Joshua.xlsx")
+summary(data)
+head(data)
+```
+
+<br>
+<span style="background-color: #FFFF99">Data yang digunakan adalah data rataan temperatur di Kab. Bogor, dimulai dari rentang waktu 20 Desember 2024 hingga 26 Agustus 2025</span>
+
+
+# **EKSPLORASI DATA**
+```{r}
+data <- data %>% dplyr::select(date,temp_mean)
+str(data)
+dim(data)
+
+colSums(is.na(data))
+data[!complete.cases(data), ]
+```
+
+<br>
+<span style="background-color: #FFFF99">Ditemukan 2 amatan yang null alias tidak memiliki nilai. Selanjutnya, untuk menangani hal ini, akan dilakukan imputasi nilai menggunakan rataan dari seluruh nilai temp_mean.</span>
+
+# **IMPUTASI DATA KOSONG**
+```{r}
+mean_val <- mean(data$temp_mean, na.rm = TRUE)
+data$temp_mean[is.na(data$temp_mean)] <- mean_val
+
+colSums(is.na(data))
+data[!complete.cases(data), ]
+```
+<br>
+<span style="background-color: #FFFF99"> Setelah dilakukan imputasi data, tidak lagi ditemukan nilai kosong pada data. Imputasi nilai kosong dilakukan dengan menggunakan nilai rataan dari Yt(temperature_mean). Sekarang data sudah siap untuk dianalisis dengan metode smoothing</span>
+
+# **TEST X TRAIN**
+
+```{r}
+data.ts <- ts(data$temp_mean)
+n <- nrow(data)
+n_train <- floor(0.8*n)
+training_ma <- data[1:n_train,]
+testing_ma <- data[(n_train+1):n,]
+train_ma.ts<- ts(training_ma$temp_mean)
+test_ma.ts<- ts(testing_ma$temp_mean)
+```
+<br>
+<span style="background-color: #FFFF99"> Data di split dengan rasio data latih:data uji 80:20. Selanjutnya, untuk pengecekan kestasioneran data, akan dilakukan hanya pada data latih saja (karena data latih yang digunakan untuk membentuk model kedepannya). </span>
+
+# **UJI DATA LATIH SAJA**
+```{r}
+head(train_ma.ts)
+```
+
+
+```{r}
+plot_data <- train_ma.ts |> as_tsibble() |> 
+  ggplot(aes(x = index, y = value)) + geom_line() + theme_bw() +
+  xlab("Obs") + ylab("Nilai")
+plot_data
+```
+<br>
+<span style="background-color: #FFFF99"> Terlihat pada plot time series, data train (data latih) cenderung bergerak di sekitar nilai tengah yang sama, serta fluktuasi/amplitudo di setiap amatan terlihat konstan. Hasil ini mendindikasikan bahwa data cenderung stasioner dalam rataan dan ragam.</span>
+
+
+# **EKSPLORASI KESTASIONERAN DATA LATIH**
+## **Kestasioneran dalam Rataan**
+```{r}
+mean(train_ma.ts)
+lattice::densityplot(as.vector(train_ma.ts))
+```
+<br>
+<span style="background-color: #FFFF99"> Diperoleh nilai rata-rata sebesar 25.706. Dari density plot data, terlihat bahwa data cenderung berkumpul di angka 25.5 hingga 26. Ini bisa jadi pertanda baik untuk kestasioneran dalam rataan. Namun, uji lanjutan tetap perlu dilakukan.</span>
+
+## **Plot ACF**
+```{r}
+acf(train_ma.ts)
+```
+<br>
+<span style="background-color: #FFFF99"> Terlihat bahwa plot ACF di atas membentuk pola *tails off* cukup panjang (turun perlahan). Hasil plot ACF baru terlihat tidak signifikan pada lag 4, dan dari lag 19 hingga seterusnya, terlihat adanya kecenderungan untuk membentuk pola gelombang sinus.Dari sini, terlihat bahwa data masih punya kecenderungan pola tren yang tentunya harus diselidiki lebih lanjut dengan uji formal. Dan Plot ACF terlihat dimulai dari lag 1, bukan lag 0.</span>
+
+## **Uji ADF**
+<br>
+$H_0$ : Data Tidak Stasioner dalam Rataan <br>
+$H_1$ : Data Stasioner dalam Rataan
+```{r}
+tseries::adf.test(train_ma.ts)
+```
+<br>
+<span style="background-color: #FFFF99"> Terlihat bahwa hasil uji ADF menunjukkan nilai $P - Value < 0.05$. Sehingga keputusan yang diambil adalah tolak $H_0$. Artinya, **data stasioner dalam rataan**. Hasil ini sedikit berbeda dengan plot time series dan plot ACF sebelumnya.</span>
+
+# **KESTASIONERAN DATA LATIH DALAM RAGAM**
+```{r}
+index <- seq(1:200)
+bc <- boxcox(
+  train_ma.ts ~ index,
+  lambda = seq(-7, 12, by = 0.01)
+)
+```
+
+```{r}
+lambda <- bc$x[which.max(bc$y)]
+cat("Lambda Optimum: ", lambda)
+```
+
+```{r}
+ci_lambda <- bc$x[bc$y > max(bc$y) - 0.5 * qchisq(0.95, 1)]
+ci_lower <- min(ci_lambda)
+ci_upper <- max(ci_lambda)
+
+c(Batas_Bawah = ci_lower, Batas_Atas = ci_upper)
+```
+<br>
+<span style="background-color: #FFFF99"> Terlihat bahwa selang kepercayaan untuk lambda memiliki batas bawah -1.2, dan batas atas 8.57. Hal ini menunjukkan bahwa **lambda = 1** terdapat dalam selang. Hasil ini dapat diartikan bahwa **data stasioner dalam ragam**</span>
+
+# **SPESIFIKASI MODEL**
+```{r}
+par(mfrow = c(1,2))
+acf(train_ma.ts, main="ACF", lag.max=20)
+pacf(train_ma.ts, main="PACF", lag.max=20)
+```
+<br>
+<span style="background-color: #FFFF99"> Setelah dilakukan visualisasi pada data latih menggunakan ACF dan PACF, terlihat bahwa pada plot ACF, *cuts off* setelah lag 3. Model yang potensial adalah ARIMA(3,0,0)(walau sebenarnya masih kurang tepat juga jika dikatakan *cuts off*, karena didepannya masih ada lag yang signifikan dan grafik ACFnya condong ke tails off).Selanjutnya pada plot PACF, terlihat bahwa *cuts off* terjadi setelah lag pertama. Model yang potensial adalah ARIMA(1,0,0). </span>
+
+```{r}
+eacf(train_ma.ts)
+```
+<br>
+<span style="background-color: #FFFF99"> Menggunakan plot EACF, dapat ditemukan beberapa model potensial dengan melihat ujung segitiga yang terbentuk, antara lain ARIMA(0,0,3), ARIMA(1,0,1), ARIMA(2,0,1), ARIMA(3,0,1) </span>
+
+# **PENDUGAAN PARAMETER DAN SELEKSI ORDO MODEL**
+## **ARIMA(0,0,3)**
+```{r}
+model1=Arima(train_ma.ts, order=c(0,0,3),method="ML")
+summary(model1)
+```
+```{r}
+lmtest::coeftest(model1)
+```
+<br>
+<span style="background-color: #FFFF99"> Menggunakan ordo ARIMA (0,0,3) atau setara MA(3), diperoleh **AIC = 347.47**. Kemudian, terdapat peubah/parameter yang tidak signifikan, yaitu ma2. </span>
+
+## **ARIMA (1,0,1)**
+```{r}
+model2=Arima(train_ma.ts, order=c(1,0,1),method="ML")
+summary(model2)
+```
+
+```{r}
+lmtest::coeftest(model2)
+```
+<br>
+<span style="background-color: #FFFF99"> Menggunakan ordo ARIMA (1,0,1) atau setara ARMA(1,1), diperoleh **AIC = 343.73**. Kemudian, terdapat peubah/parameter yang tidak signifikan, yaitu ma1. </span>
+
+## **ARIMA(2,0,1)**
+```{r}
+model3=Arima(train_ma.ts, order=c(2,0,1),method="ML")
+summary(model3)
+```
+
+```{r}
+lmtest::coeftest(model3)
+```
+<br>
+<span style="background-color: #FFFF99"> Menggunakan ordo ARIMA (2,0,1) atau setara ARMA(2,1), diperoleh **AIC = 341.41**. Kemudian, seluruh peubah/parameternya signifikan. </span>
+
+## **ARIMA(3,0,1)**
+```{r}
+model4=Arima(train_ma.ts, order=c(3,0,1),method="ML")
+summary(model4)
+```
+
+```{r}
+lmtest::coeftest(model4)
+```
+<br>
+<span style="background-color: #FFFF99"> Menggunakan ordo ARIMA (3,0,1) atau setara ARMA(3,1), diperoleh **AIC = 343.4**. Kemudian, terdapat peubah/parameter yang tidak signifikan, yaitu ar3. </span>
+
+## **Perbandingan semua model**
+```{r}
+hasil_model <- data.frame(
+  Model = c("ARIMA(0,0,3)",
+            "ARIMA(1,0,1)",
+            "ARIMA(2,0,1)",
+            "ARIMA(3,0,1)"),
+  AIC = c(
+    AIC(model1),
+    AIC(model2),
+    AIC(model3),
+    AIC(model4)
+  ),
+  BIC = c(
+    BIC(model1),
+    BIC(model2),
+    BIC(model3),
+    BIC(model4)
+  )
+)
+
+hasil_model
+```
+<br>
+<span style="background-color: #FFFF99"> Karena model 3, yakni ARIMA(2,0,1) memiliki AIC terkecil, BIC relatif rendah, dan seluruh peubah/parameternya signifikan, maka ARIMA(2,0,1) dipilih sebagai model prediksi. </span>
+
+
+
+# **ANALISIS SISAAN MODEL TERBAIK**
+## **Eksplorasi Sisaan**
+```{r}
+sisaan <- model3$residuals
+```
+
+```{r}
+par(mfrow=c(2,2))
+car::qqPlot(sisaan)
+plot(c(1:length(sisaan)),sisaan)
+acf(sisaan)
+pacf(sisaan)
+```
+
+<br>
+<span style="background-color: #FFFF99"> Berdasarkan plot kuantil-kuantil normal, secara eksplorasi ditunjukkan sisaan menyebar normal mengikuti garis sudut $\pi/4$. Kemudian dapat dilihat juga lebar pita sisaan yang cenderung sama menandakan bahwa sisaan memiliki ragam yang homogen. Akan tetapi, plot ACF dan PACF sisaan ARIMA(2,0,1) signifikan pada lag ke-8 sehingga **sisaan tidak saling bebas**. Kondisi ini akan diuji lebih lanjut dengan uji formal. </span>
+
+# **UJI FORMAL LANJUTAN**
+## **Normalitas**
+<br>
+$H_0$ : Sisaan menyebar normal <br>
+$H_1$ : Sisaan tidak menyebar normal
+```{r}
+ks.test(sisaan,"pnorm") 
+```
+<br>
+<span style="background-color: #FFFF99"> Uji formal menggunakan uji Kolmogorov-Smirnov menunjukkan bahwa data residual model tidak menyebar normal, karena memiliki *p-value* \< $\alpha$ (5%) sehingga tolak $H_0$ dalam taraf nyata 5%. Hasil ini tidak sesuai dengan QQ-plot.</span>
+
+## **Kebebasan Sisaan**
+<br>
+$H_0$ : Sisaan saling bebas <br>
+$H_1$ : Sisaan tidak saling bebas normal
+```{r}
+Box.test(sisaan, type = "Ljung") 
+```
+<br>
+<span style="background-color: #FFFF99"> Uji formal menggunakan uji Ljung-Box menunjukkan bahwa data residual model sudah saling bebas, karena memiliki *p-value* \> $\alpha$ (5%) sehingga tidak cukup bukti untuk tolak $H_0$ dalam taraf nyata 5%. Hasil ini justru berlawanan dengan visualisasi sisaan yang tadi menunjukkan adanya autokorelasi pada lag 8.</span>
+
+## **Homogenitas Ragam**
+<br>
+$H_0$ : Ragam sisaan homogen <br>
+$H_1$ : Ragam sisaan tidak homogen
+
+```{r}
+Box.test((sisaan)^2, type = "Ljung") 
+```
+<br>
+<span style="background-color: #FFFF99"> Uji formal menggunakan uji Ljung-Box menunjukkan bahwa ragam sisaan model sudah homogen, karena memiliki *p-value* \> $\alpha$ (5%) sehingga tidak cukup bukti untuk tolak $H_0$ dalam taraf nyata 5%.</span>
+
+## **Nilai Tengah Sisaan = 0**
+<br>
+$H_0$ : Nilai tengah sisaan = 0 <br>
+$H_1$ : Nilai tengah sisaan != 0
+```{r}
+t.test(sisaan, mu = 0, conf.level = 0.95) 
+```
+<br>
+<span style="background-color: #FFFF99"> Uji formal menggunakan uji t menunjukkan bahwa sisaan sudah bergerak di sekitar nilai tengah yang bernilai 0, karena memiliki *p-value* \> $\alpha$ (5%) sehingga tidak cukup bukti untuk tolak $H_0$ dalam taraf nyata 5%.</span>
+
+<span style="background-color: #FFFF99"> Namun hal ini membuat saya bingung, jika uji formal homogenitas ragamnya terpenuhi dan uji nilai tengah sisaan = 0 nya juga terpenuhi, kenapa bisa asumsi normalitasnya tidak terpenuhi?? [namun dalam literatur yang saya baca, asumsi terpenting untuk forecasting menggunakan model deret waktu adalah sisaan yang saling bebas. Oleh karena itu, proses akan terus dilanjutkan, meski asumsi normalitasnya tidak terpenuhi]</span>
+
+## **Overfitting**
+### Adjust Pertama untuk Model 3
+```{r}
+model3.adj1=Arima(train_ma.ts, order=c(3,0,1),method="ML")
+summary(model3.adj1)
+```
+
+```{r}
+lmtest::coeftest(model3.adj1)
+```
+<br>
+<span style="background-color: #FFFF99"> ARIMA (3,0,1) alias menaikan satu ordo AR ternyata tidak lebih baik dari model 3 , yakni ARIMA(2,0,1). Selain AIC nya lebih besar, ada peubah/parameter yang tidak signifikan juga , yakni ar3 (model ARIMA(2,0,1) signifikan untuk semua peubah/parameternya). </span>
+
+### Adjust Kedua untuk Model 3
+```{r}
+model3.adj2=Arima(train_ma.ts, order=c(2,0,2),method="ML")
+summary(model3.adj2)
+```
+
+```{r}
+lmtest::coeftest(model3.adj2)
+```
+<br>
+<span style="background-color: #FFFF99"> ARIMA (2,0,2) alias menaikan satu ordo MA ternyata tidak lebih baik dari model 3 , yakni ARIMA(2,0,1). Selain AIC nya lebih besar, ada peubah/parameter yang tidak signifikan juga , yakni ar3 (model ARIMA(2,0,1) signifikan untuk semua peubah/parameternya). </span>
+
+# **PERAMALAN**
+```{r}
+ramalan <- forecast::forecast(model3, h = length(test_ma.ts)) 
+ramalan
+```
+```{r}
+data.ramalan <- ramalan$mean
+plot(ramalan)
+```
+<br>
+<span style="background-color: #FFFF99"> Berdasarkan hasil plot ramalan di atas, dapat dilihat bahwa ramalan ARIMA(2,0,1) cenderung membentuk pola tren naik, diikuti dengan selang kepercayaannya juga (lower, upper, dan point forecast membentuk tren naik untuk prediksi 50 data uji). </span>
+
+
+## **Akurasi Peramalan**
+```{r}
+perbandingan<-matrix(data=c(test_ma.ts, data.ramalan),
+                     nrow = 50, ncol = 2)
+colnames(perbandingan)<-c("Aktual","Hasil Forecast")
+perbandingan
+```
+
+```{r}
+accuracy(data.ramalan,as.numeric(test_ma.ts))
+```
+<br>
+<span style="background-color: #FFFF99"> Performa model dalam memprediksi data uji juga terbilang sudah baik. Karena MAPE yang dihasilkan = 3.17% < 10%. Sehingga terbukti, bahwa model yang dibangun dari data latih **tidak mengalami overfitting** (pas hanya pada data latih, tapi di data ujinya bobrok)</span>
+
+```{r}
+ts.plot(data.ts, col = "black", lty = 1,
+        xlab = "Waktu", ylab = "Temperatur")
+
+lines(201:250, data.ramalan, col = "blue", lty = 2, lwd = 2)
+legend("topleft", 
+       legend = c("Data Aktual", "Forecast"),
+       col = c("black", "blue"),
+       lty = c(1,2,3), lwd = c(1,2,1), bty = "n")
+```
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
